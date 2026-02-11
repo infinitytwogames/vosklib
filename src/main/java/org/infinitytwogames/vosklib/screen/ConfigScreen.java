@@ -1,7 +1,9 @@
 package org.infinitytwogames.vosklib.screen;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.infinitytwogames.vosklib.VoskManager;
@@ -12,147 +14,183 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ConfigScreen extends Screen {
-    private Screen lastScreen;
-    private final List<String> temp = new ArrayList<>(3);
-    private final List<Button> models = new ArrayList<>(3);
-    private final List<String> needed = new ArrayList<>(3);
-    private final List<Button> missingModels = new ArrayList<>(3);
-    private static String selected;
-    private Button download;
+    private final Screen lastScreen;
+    private ModelList modelList;
+    private static String selectedDownload = "";
+    private Button downloadButton;
     private ProgressBar progressBar;
+    private List<DataLoader.VoskModel> onlineModels = new ArrayList<>();
+    private boolean isLoading = true;
+    private DataLoader.VoskModel toDownload;
     
     public ConfigScreen(Screen lastScreen) {
         super(Component.literal("VOSK Model Manager"));
-        
         this.lastScreen = lastScreen;
     }
     
     @Override
     protected void init() {
-        // Clear lists to prevent duplicates if init() is called again (like on window resize)
-        this.models.clear();
-        this.temp.clear();
-        this.missingModels.clear();
-        this.needed.clear();
+        // Define the scrollable area (top margin 40, bottom margin 60 for buttons/progress)
+        this.modelList = new ModelList(this.minecraft, this.width, this.height, 40, this.height - 60, 25);
+        this.addWidget(this.modelList);
         
-        // 1. Fill temp list from DataLoader
-        if (DataLoader.getSmallPath() != null) temp.add("Small");
-        else needed.add("Small");
-        if (DataLoader.getMediumPath() != null) temp.add("Medium");
-        else needed.add("Medium");
-        if (DataLoader.getLargePath() != null) temp.add("Large");
-        else needed.add("Large");
+        // Populate the list
+        this.isLoading = true;
         
-        int row = 0;
-        for (String modelName : temp) {
-            // Check if this button should start as 'Selected'
-            boolean isSelected = modelName.toLowerCase().contains(DataLoader.getSelected().toLowerCase());
-            
-            Button button = Button.builder(Component.literal(modelName), this::onRadioButtonPressed)
-                    .bounds(16, row * (20 + 4) + 40, 100, 20) // Simplified math: row * (height + spacing)
-                    .build();
-            
-            // Use the 'active' state logic you wrote
-            button.active = !isSelected;
-            
-            addRenderableWidget(button);
-            models.add(button);
-            row++;
-        }
+        // Call static method
+        DataLoader.getOnlineModels(models -> {
+            // IMPORTANT: We must jump back to the Minecraft thread to update UI components!
+            Minecraft.getInstance().execute(() -> {
+                this.onlineModels = models;
+                this.isLoading = false;
+                this.refreshList(); // Method to populate the ModelList
+            });
+        });
         
-        row = 0;
-        int centerX = width / 2;
+        // Action Buttons
+        this.downloadButton = addRenderableWidget(Button.builder(Component.literal("Download"), b -> startDownload())
+                .bounds(this.width / 2 - 105, this.height - 25, 100, 20).build());
+        this.downloadButton.active = false;
         
-        for (String missing : needed) {
-            Button button = Button.builder(Component.literal(missing), this::downloadModelRadio)
-                    .bounds(centerX, row * (20 + 4) + 40, 100, 20)
-                    .build();
-            
-            addRenderableWidget(button);
-            missingModels.add(button);
-            row++;
-        }
+        addRenderableWidget(Button.builder(Component.literal("Save & Exit"), b -> {
+            VoskManager.init();
+            this.minecraft.setScreen(lastScreen);
+        }).bounds(this.width / 2 + 5, this.height - 25, 100, 20).build());
         
-        // Back Button (Bottom Right)
-        addRenderableWidget(Button.builder(Component.literal("Save"), b -> {
-            back();
-            minecraft.setScreen(lastScreen);
-        })
-                .bounds(this.width - 116, this.height - 36, 100, 20).build());
-        
-        // Download button
-        download = Button.builder(Component.literal("Download"), this::download)
-                .bounds(this.width - 224, this.height - 36, 100, 20)
-                .build();
-        download.active = false;
-        
-        addRenderableWidget(download);
-        
-        progressBar = new ProgressBar(16, height - 36, width - 248, 20);
+        this.progressBar = new ProgressBar(16, height - 55, width - 36, 10);
     }
     
-    private void back() {
-        VoskManager.init();
-    }
-    
-    private void download(Button button) {
-        startDownload(selected);
-    }
-    
-    private void downloadModelRadio(Button button) {
-        selected = button.getMessage().getString();
+    private void refreshList() {
+        this.modelList.clear();
+        ModelEntry toSelect = null;
+        String currentlySelected = DataLoader.getSelected();
         
-        for (Button b : missingModels) {
-            b.active = true; // Enable all
+        // 1. Create a copy or sort the existing list
+        onlineModels.sort((m1, m2) -> {
+            boolean d1 = DataLoader.isModelDownloaded(m1.name());
+            boolean d2 = DataLoader.isModelDownloaded(m2.name());
+            
+            // Boolean.compare returns 0 if equal, -1 if d1 < d2, 1 if d1 > d2.
+            int downloadCompare = Boolean.compare(d2, d1);
+            
+            if (downloadCompare != 0) {
+                return downloadCompare;
+            }
+            // If both are installed or both are missing, sort alphabetically
+            return m1.name().compareToIgnoreCase(m2.name());
+        });
+        
+        // 2. Add to the UI list
+        for (DataLoader.VoskModel model : onlineModels) {
+            boolean isDownloaded = DataLoader.isModelDownloaded(model.name());
+            ModelEntry entry = new ModelEntry(model, isDownloaded);
+            
+            this.modelList.add(entry);
+            
+            if (model.name().equalsIgnoreCase(currentlySelected)) {
+                toSelect = entry;
+            }
         }
-        button.active = false; // Disable only the clicked one
-        download.active = true;
-    }
-    
-    private void onRadioButtonPressed(Button button) {
-        String modelName = button.getMessage().getString();
         
-        // 1. Update the actual Mod Data
-        DataLoader.select(modelName.toLowerCase());
-        DataLoader.save();
-        
-        // 2. Update UI Visuals
-        for (Button b : models) {
-            b.active = true; // Enable all
+        if (toSelect != null) {
+            this.modelList.setSelected(toSelect);
         }
-        button.active = false; // Disable only the clicked one
     }
     
     @Override
     public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
-        this.renderBackground(guiGraphics);
-        
         FileDownloader.getSpeedTimer().update();
         
-        guiGraphics.drawString(font, "Downloaded Models", 16, 16, 0xffffff);
-        guiGraphics.drawString(font, "Available Models", (width / 2) + 8, 16, 0xffffff);
+        this.renderBackground(guiGraphics);
+        this.modelList.render(guiGraphics, mouseX, mouseY, partialTick);
         
-        if (temp.isEmpty()) guiGraphics.drawString(font, "No Models were found.", 40, 32, 0x919191);
+        guiGraphics.drawCenteredString(font, this.title, this.width / 2, 10, 0xFFFFFF);
+        if (isLoading) {
+            String text = "Loading...";
+            guiGraphics.drawCenteredString(font, text, this.width / 2, font.lineHeight + 10 + 2, 0xa3a3a3);
+        }
         
         if (DataLoader.totalSize.get() > 0) {
             progressBar.draw(guiGraphics, partialTick);
-            
-            // Add your speed/ETA text below it
-            guiGraphics.drawString(font, FileDownloader.getSpeedText(), 16, height - 12, 0xFFFFFF);
-            guiGraphics.drawString(font, FileDownloader.getETAText(), 128, height - 12, 0xFFFFFF);
-            guiGraphics.drawString(font, "Downloading " + selected + "...", 16, height - 48, 0xffffff);
+            guiGraphics.drawString(font, FileDownloader.getSpeedText() + " | " + FileDownloader.getETAText(), 16, height - 42, 0xAAAAAA);
         }
         
         super.render(guiGraphics, mouseX, mouseY, partialTick);
     }
     
-    private void startDownload(String model) {
-        String url;
-        if (model.toLowerCase().contains("small")) url = DataLoader.small;
-        else if (model.toLowerCase().contains("medium")) url = DataLoader.medium;
-        else if (model.toLowerCase().contains("large")) url = DataLoader.large;
-        else throw new RuntimeException("Unknown Model name: "+model);
+    private void startDownload() {
+        if (FileDownloader.getSpeedTimer().isActive()) return;
+        DataLoader.startDownload(toDownload.name(), toDownload.url());
+    }
+    
+    // --- INNER CLASSES FOR SCROLLING ---
+    
+    class ModelList extends ObjectSelectionList<ModelEntry> {
+        public ModelList(Minecraft mc, int width, int height, int top, int bottom, int itemHeight) {
+            super(mc, width, height, top, bottom, itemHeight);
+        }
         
-        DataLoader.startDownload(model.toLowerCase(), url);
+        public void add(ModelEntry entry) {
+            addEntry(entry);
+        }
+        
+        public void clear() {
+            clearEntries();
+        }
+    }
+    
+    class ModelEntry extends ObjectSelectionList.Entry<ModelEntry> {
+        private final boolean isDownloaded;
+        private DataLoader.VoskModel model;
+        
+        public ModelEntry(DataLoader.VoskModel model, boolean isDownloaded) {
+            this.isDownloaded = isDownloaded;
+            this.model = model;
+        }
+        
+        @Override
+        public void render(GuiGraphics guiGraphics, int index, int top, int left, int width, int height, int mouseX, int mouseY, boolean isHovered, float pt) {
+            int color = isDownloaded ? 0x55FF55 : 0xFFFFFF;
+            int nameColor = model.obsolete() ? 0x777777 : 0xAAAAAA;
+            String label = isDownloaded ? " (Installed)" : "";
+            
+            // Calculate available width (list width minus some padding for the scrollbar area)
+            int maxWidth = width - 20;
+            
+            // Truncate the name if it's too long
+            String displayName = font.plainSubstrByWidth(model.name() + label, maxWidth);
+            if (model.name().length() > displayName.length()) {
+                displayName = font.plainSubstrByWidth(model.name(), maxWidth - font.width("...")) + "...";
+            }
+            
+            // Render the (possibly truncated) name
+            guiGraphics.drawString(font, displayName, left + 5, top + 2, color);
+            
+            // Do the same for subtext just in case
+            String subtext = String.format("%s | %s | %s", model.langText(), model.sizeText(), model.type());
+            String displaySubtext = font.plainSubstrByWidth(subtext, maxWidth);
+            guiGraphics.drawString(font, displaySubtext, left + 5, top + 12, nameColor, false);
+            
+            if (isHovered) {
+                guiGraphics.renderTooltip(font, Component.literal(model.name()), mouseX, mouseY);
+            }
+        }
+        
+        @Override
+        public boolean mouseClicked(double mouseX, double mouseY, int button) {
+            selectedDownload = model.name();
+            if (isDownloaded) {
+                DataLoader.select(model.name().toLowerCase());
+                DataLoader.save();
+                downloadButton.active = false;
+            } else {
+                toDownload = model;
+                downloadButton.active = true;
+            }
+            return true;
+        }
+        
+        @Override
+        public Component getNarration() { return Component.literal(model.name()); }
     }
 }

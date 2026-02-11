@@ -1,28 +1,35 @@
 package org.infinitytwogames.vosklib.data;
 
+import com.google.gson.*;
+import com.mojang.logging.LogUtils;
 import net.minecraftforge.fml.loading.FMLPaths;
 import org.infinitytwogames.vosklib.VoskManager;
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public class DataLoader {
-    public static final String small = "https://alphacephei.com/kaldi/models/vosk-model-small-en-us-0.15.zip";
-    public static final String medium = "https://alphacephei.com/kaldi/models/vosk-model-en-us-0.22-lgraph.zip";
-    public static final String large = "https://alphacephei.com/kaldi/models/vosk-model-en-us-0.22.zip";
+    private static final Map<String, Path> models = Collections.synchronizedMap(new HashMap<>());
+    private static final Path config = FMLPaths.CONFIGDIR.get().resolve("vosk");
+    private static final Logger logger = LogUtils.getLogger();
     
-    private static Path smallPath, mediumPath, largePath;
-    private static Path config = FMLPaths.CONFIGDIR.get().resolve("vosk");
     private static Path selectedPath;
     private static String selected;
+    private static int refresh;
     
     public static final AtomicLong downloadedBytes = new AtomicLong(0);
     public static final AtomicLong totalSize = new AtomicLong(0);
@@ -62,11 +69,7 @@ public class DataLoader {
     }
     
     public static void register(String version, Path model) {
-        switch (version.toLowerCase().trim()) {
-            case "small" -> smallPath = model;
-            case "medium" -> mediumPath = model;
-            case "large" -> largePath = model;
-        }
+        models.put(version, model);
     }
     
     public static void startDownload(String modelType, String url) {
@@ -106,10 +109,7 @@ public class DataLoader {
         Config.SELECTED_MODEL.set(selected);
         
         // 2. Ensure the list doesn't contain nulls
-        List<String> toSave = new java.util.ArrayList<>();
-        if (smallPath != null) toSave.add("small");
-        if (mediumPath != null) toSave.add("medium");
-        if (largePath != null) toSave.add("large");
+        List<String> toSave = new ArrayList<>(models.keySet());
         
         // Double check: Forge's ConfigValue.set() fails if the object itself is null
         Config.DOWNLOADED_MODELS.set(toSave);
@@ -133,14 +133,23 @@ public class DataLoader {
     }
     
     public static void loadFromConfig() {
-        List<String> downloaded = (List<String>) Config.DOWNLOADED_MODELS.get();
+        List<String> downloaded = new ArrayList<>(Config.DOWNLOADED_MODELS.get());
+        List<String> validModels = new ArrayList<>();
         
-        // Check for each model in the config and verify the folder exists
+        refresh = Config.REFRESH_TIME.get();
+        
         for (String name : downloaded) {
             Path modelFolderPath = config.resolve(name);
             if (modelFolderPath.toFile().exists()) {
                 register(name, modelFolderPath);
+                validModels.add(name);
             }
+        }
+        
+        // Clean up the config if folders were manually deleted
+        if (validModels.size() != downloaded.size()) {
+            Config.DOWNLOADED_MODELS.set(validModels);
+            Config.SPEC.save();
         }
         
         // Set the initial selection from config
@@ -148,34 +157,6 @@ public class DataLoader {
         select(selected);
         
         if (!selected.toLowerCase().contains("none")) VoskManager.init();
-    }
-    
-    public static Path getSmallPath() {
-        return smallPath;
-    }
-    
-    public static void setSmallPath(Path smallPath) {
-        DataLoader.smallPath = smallPath;
-    }
-    
-    public static Path getMediumPath() {
-        return mediumPath;
-    }
-    
-    public static void setMediumPath(Path mediumPath) {
-        DataLoader.mediumPath = mediumPath;
-    }
-    
-    public static Path getLargePath() {
-        return largePath;
-    }
-    
-    public static void setLargePath(Path largePath) {
-        DataLoader.largePath = largePath;
-    }
-    
-    public static Path getConfig() {
-        return config;
     }
     
     public static Path getSelectedPath() {
@@ -193,11 +174,105 @@ public class DataLoader {
             return; // Exit early safely
         }
         
-        if (model.contains("small")) selectedPath = smallPath;
-        else if (model.contains("medium")) selectedPath = mediumPath;
-        else if (model.contains("large")) selectedPath = largePath;
-        else throw new RuntimeException("Unknown value: "+model);
+        Path path = models.get(model);
+        if (path != null) selectedPath = path;
+        else {
+            // Log a warning instead of crashing
+            logger.warn("VoskLib: Configured model '{}' not found. Resetting to none.", model);
+            selected = "none";
+            selectedPath = null;
+        }
         
         selected = model;
+    }
+    
+    public static void fetchOnlineModels(Consumer<List<VoskModel>> callback) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                URL url = new URL("https://alphacephei.com/vosk/models/model-list.json");
+                try (InputStreamReader reader = new InputStreamReader(url.openStream())) {
+                    JsonArray array = JsonParser.parseReader(reader).getAsJsonArray();
+                    List<VoskModel> models = getVoskModels(array);
+                    
+                    // Sort by language, then by type (small vs big)
+                    models.sort(Comparator.comparing(VoskModel::langText).thenComparing(VoskModel::type));
+                    
+                    callback.accept(models);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+    
+    private static @NotNull List<VoskModel> getVoskModels(JsonArray array) {
+        List<VoskModel> models = new ArrayList<>();
+        
+        for (JsonElement element : array) {
+            JsonObject obj = element.getAsJsonObject();
+            
+            // SKIP OBSOLETE MODELS to save user bandwidth and disk space
+            if (obj.get("obsolete").getAsString().equals("true")) continue;
+            
+            models.add(new VoskModel(
+                    obj.get("name").getAsString(),
+                    obj.get("url").getAsString(),
+                    obj.get("size_text").getAsString(),
+                    obj.get("lang_text").getAsString(),
+                    false,
+                    obj.get("type").getAsString()
+            ));
+        }
+        return models;
+    }
+    
+    public static boolean isModelDownloaded(String name) {
+        return models.get(name) != null;
+    }
+    
+    public static void getOnlineModels(Consumer<List<VoskModel>> callback) {
+        Path file = config.resolve("manifest.json");
+        
+        if (Files.exists(file)) {
+            try {
+                Instant fileInstant = Files.getLastModifiedTime(file).toInstant();
+                Instant now = Instant.now();
+                
+                // Calculate the duration between them
+                Duration age = Duration.between(fileInstant, now);
+                
+                boolean b = age.toDays() >= refresh;
+                
+                if (!(refresh > 0 && b)) {
+                    JsonElement element = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+                    
+                    if (element instanceof JsonArray array) {
+                        List<VoskModel> models = getVoskModels(array);
+                        models.sort(Comparator.comparing(VoskModel::langText).thenComparing(VoskModel::type));
+                        
+                        callback.accept(models);
+                        return;
+                        
+                    } else {
+                        logger.warn("Unable to parse a model. Getting from URL...");
+                    }
+                }
+                
+            } catch (IOException e) {
+                logger.error("VoskLib: Cached manifest is corrupted. Re-fetching from source.", e);
+            }
+        }
+        
+        fetchOnlineModels(callback);
+    }
+    
+    public record VoskModel(
+            String name,
+            String url,
+            String sizeText,
+            String langText,
+            boolean obsolete,
+            String type
+    ) {
     }
 }

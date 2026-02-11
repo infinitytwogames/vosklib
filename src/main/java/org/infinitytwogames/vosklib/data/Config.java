@@ -2,7 +2,6 @@ package org.infinitytwogames.vosklib.data;
 
 import net.minecraftforge.common.ForgeConfigSpec;
 
-import java.util.Arrays;
 import java.util.List;
 
 public class Config {
@@ -13,6 +12,7 @@ public class Config {
     public static final ForgeConfigSpec.ConfigValue<String> SELECTED_MODEL;
     public static final ForgeConfigSpec.DoubleValue SENSITIVITY;
     public static final ForgeConfigSpec.BooleanValue AUTO_DOWNLOAD;
+    public static final ForgeConfigSpec.IntValue REFRESH_TIME;
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> DOWNLOADED_MODELS;
     
     static {
@@ -35,6 +35,11 @@ public class Config {
                 .defineList("downloadedModels",
                         List.of(), // Default value (if empty)
                         entry -> entry instanceof String); // Validator
+        
+        REFRESH_TIME = BUILDER
+                .comment("Time for the manifest to be redownloaded.")
+                .defineInRange("days", 36, 0, 356)
+        ;
         
         BUILDER.pop();
         SPEC = BUILDER.build();

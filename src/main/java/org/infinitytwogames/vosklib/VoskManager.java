@@ -6,7 +6,6 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
 import org.infinitytwogames.vosklib.data.DataLoader;
 import org.slf4j.Logger;
 import org.vosk.Model;
@@ -146,7 +145,13 @@ public class VoskManager {
         }
     }
     
-    public static Recognizer getRecognizer() {
+    public static void feedAudio(byte[] audioData) {
+        if (VoskManager.getRecognizer() != null && VoskManager.isListening()) {
+            VoskManager.getRecognizer().acceptWaveForm(audioData, audioData.length);
+        }
+    }
+    
+    protected static Recognizer getRecognizer() {
         return recognizer;
     }
 }

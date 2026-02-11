@@ -73,4 +73,8 @@ public class Interval {
     public void start() {
         run = true;
     }
+    
+    public boolean isActive() {
+        return run;
+    }
 }

@@ -1,4 +1,4 @@
-package org.infinitytwogames.vosklib.events.manager;
+package org.infinitytwogames.vosklib;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -7,8 +7,6 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
-import org.infinitytwogames.vosklib.KeyInputHandler;
-import org.infinitytwogames.vosklib.VoskManager;
 import org.infinitytwogames.vosklib.events.VoskChangeRecognitionState;
 import org.infinitytwogames.vosklib.events.VoskVoiceEvent;
 
