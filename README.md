@@ -90,7 +90,7 @@ We welcome contributions\! As a project in early development, all contributions 
 This project is licensed under the **GNU GPL v3**. This ensures that the software remains free and open-source. Anyone who modifies or distributes this code must also share their source code under the same license.
 
 **Trademark Notice:**
-The names **Nyctotile**, **Infinity Two Games**, and all associated logos are trademarks of Infinity Two Games. While the source code is open-source, this license does not grant you permission to use our brand names or logos for your own distributions or commercial products without express written consent.
+The names **VoskLib**, **Infinity Two Games**, and all associated logos are trademarks of Infinity Two Games. While the source code is open-source, this license does not grant you permission to use our brand names or logos for your own distributions or commercial products without express written consent.
 
 ## 📜 Credits
 
