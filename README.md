@@ -21,7 +21,7 @@ allowing developers to create voice-activated gameplay, magic spells, or accessi
 2. Drop the `vosklib-1.0.jar` into your `mods` folder.
 3. **Download a Model:**
 * Open the game and go to **Mods** -> **VoskLib** -> **Config**.
-* Select a model (Small, Medium, or Large) and click **Download**. 
+* Select a model and click **Download**. 
 * VoskLib will handle the download and extraction automatically.
 
 ---
@@ -75,6 +75,22 @@ MinecraftForge.EVENT_BUS.post(new VoskChangeRecognitionState(false));
 
 * **V (Default):** Toggles voice recognition on/off.
 * *Configurable in the standard Controls menu under the "Vosk Voice Library" category.*
+
+## 👋 Contribution
+
+We welcome contributions\! As a project in early development, all contributions are valuable, from code implementation to bug reporting.
+
+### How to Contribute
+
+1.  **Report Issues:** Found a bug? Please open a detailed **Issue** on the repository. Include the full stacktrace and steps to reproduce.
+2.  **Submit Code:** Fork the repository, create a descriptive branch, and submit a **Pull Request (PR)** with your changes. New features or bug fixes should align with the project's architectural principles.
+
+### ⚖️ Licensing & Trademarks
+
+This project is licensed under the **GNU GPL v3**. This ensures that the software remains free and open-source. Anyone who modifies or distributes this code must also share their source code under the same license.
+
+**Trademark Notice:**
+The names **VoskLib**, **Infinity Two Games**, and all associated logos are trademarks of Infinity Two Games. While the source code is open-source, this license does not grant you permission to use our brand names or logos for your own distributions or commercial products without express written consent.
 
 ## 📜 Credits
 
