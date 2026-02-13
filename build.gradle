@@ -143,26 +143,37 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     implementation 'com.alphacephei:vosk:0.3.45'
-    implementation 'net.java.dev.jna:jna:5.13.0'
+//    implementation 'net.java.dev.jna:jna:5.13.0'
+
+        // We use compileOnly so it's not included in the jar
+        compileOnly 'net.java.dev.jna:jna:5.14.0'
+        compileOnly 'net.java.dev.jna:jna-platform:5.14.0'
+
 
     minecraftLibrary 'com.alphacephei:vosk:0.3.45'
-    minecraftLibrary 'net.java.dev.jna:jna:5.13.0'
+//    minecraftLibrary 'net.java.dev.jna:jna:5.13.0'
 
     // Keep these as they were
     shade 'com.alphacephei:vosk:0.3.45'
-    shade 'net.java.dev.jna:jna:5.13.0'
+//    shade 'net.java.dev.jna:jna:5.13.0'
 }
 
 shadowJar {
-    // ONLY bundle things in the 'shade' configuration
     configurations = [project.configurations.shade]
+
+    dependencies {
+        // Exclude JNA and its platform-specific helpers
+        exclude(dependency('net.java.dev.jna:jna'))
+        exclude(dependency('net.java.dev.jna:jna-platform'))
+    }
+
+    // Safety check: Remove any module-info files that might cause
+    // the "ResolutionException" you saw earlier
+    exclude 'module-info.class'
+    exclude 'META-INF/versions/*/module-info.class'
 
     archiveClassifier.set('all')
 
-//    relocate 'com.alphacephei.vosk', "${mod_group_id}.shadow.vosk"
-//    relocate 'org.vosk', "${mod_group_id}.shadow.org.vosk"
-
-    // This is important for Forge remapping
     finalizedBy 'reobfShadowJar'
 }
 

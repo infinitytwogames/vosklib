@@ -3,6 +3,7 @@ package org.infinitytwogames.vosklib.screen;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -22,6 +23,8 @@ public class ConfigScreen extends Screen {
     private List<DataLoader.VoskModel> onlineModels = new ArrayList<>();
     private boolean isLoading = true;
     private DataLoader.VoskModel toDownload;
+    private EditBox searchBox;
+    private String lastSearch = "";
     
     public ConfigScreen(Screen lastScreen) {
         super(Component.literal("VOSK Model Manager"));
@@ -30,8 +33,16 @@ public class ConfigScreen extends Screen {
     
     @Override
     protected void init() {
-        // Define the scrollable area (top margin 40, bottom margin 60 for buttons/progress)
-        this.modelList = new ModelList(this.minecraft, this.width, this.height, 40, this.height - 60, 25);
+        this.searchBox = new EditBox(this.font, this.width / 2 - 100, 22, 200, 14, Component.literal("Search..."));
+        this.searchBox.setResponder(text -> {
+            this.lastSearch = text.toLowerCase();
+            this.refreshList(); // Re-filter the list whenever typing happens
+        });
+        this.addRenderableWidget(this.searchBox);
+        
+        // 2. Adjust the list top margin so it doesn't overlap the search bar
+        // Changed top from 40 to 45 or 50
+        this.modelList = new ModelList(this.minecraft, this.width, this.height, 50, this.height - 60, 25);
         this.addWidget(this.modelList);
         
         // Populate the list
@@ -65,20 +76,22 @@ public class ConfigScreen extends Screen {
         ModelEntry toSelect = null;
         String currentlySelected = DataLoader.getSelected();
         
-        // 1. Create a copy or sort the existing list
-        onlineModels.sort((m1, m2) -> {
-            boolean d1 = DataLoader.isModelDownloaded(m1.name());
-            boolean d2 = DataLoader.isModelDownloaded(m2.name());
-            
-            // Boolean.compare returns 0 if equal, -1 if d1 < d2, 1 if d1 > d2.
-            int downloadCompare = Boolean.compare(d2, d1);
-            
-            if (downloadCompare != 0) {
-                return downloadCompare;
-            }
-            // If both are installed or both are missing, sort alphabetically
-            return m1.name().compareToIgnoreCase(m2.name());
-        });
+        onlineModels.stream()
+                .filter(model -> {
+                    if (lastSearch.isEmpty()) return true;
+                    return model.name().toLowerCase().contains(lastSearch) ||
+                            model.langText().toLowerCase().contains(lastSearch);
+                })
+                .sorted((m1, m2) -> {
+                    // Keep your improved multi-level sorting logic here
+                    boolean d1 = DataLoader.isModelDownloaded(m1.name());
+                    boolean d2 = DataLoader.isModelDownloaded(m2.name());
+                    int downloadCompare = Boolean.compare(d2, d1);
+                    if (downloadCompare != 0) return downloadCompare;
+                    
+                    return m1.langText().compareToIgnoreCase(m2.langText());
+                })
+                .forEach(model -> this.modelList.add(new ModelEntry(model, DataLoader.isModelDownloaded(model.name()))));
         
         // 2. Add to the UI list
         for (DataLoader.VoskModel model : onlineModels) {
@@ -95,6 +108,15 @@ public class ConfigScreen extends Screen {
         if (toSelect != null) {
             this.modelList.setSelected(toSelect);
         }
+    }
+    
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // Ensure the search box gets focus when typing
+        if (this.searchBox.keyPressed(keyCode, scanCode, modifiers)) {
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
     
     @Override
