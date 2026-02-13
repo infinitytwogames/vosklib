@@ -19,6 +19,9 @@ public class ClientForgeEvents {
             while (KeyInputHandler.toggleVoskKey.consumeClick()) {
                 if (VoskManager.getRecognizer() == null) VoskManager.createRecognition();
                 
+                var player = Minecraft.getInstance().player;
+                if (player == null) return;
+                
                 if (!VoskManager.isListening()) {
                     VoskManager.startListening(
                             s -> Minecraft.getInstance().player.displayClientMessage(Component.literal(s), true),

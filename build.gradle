@@ -224,3 +224,18 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 tasks.build.dependsOn shadowJar
+
+tasks.register('devJar', Jar) {
+    // Newer Gradle versions use archiveClassifier.set()
+    archiveClassifier.set('dev')
+    from sourceSets.main.output
+}
+
+// Ensure the reobf task ignores the dev jar (it doesn't need remapping)
+reobf {
+    devJar { enabled = false }
+}
+
+artifacts {
+    archives devJar
+}

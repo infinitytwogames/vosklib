@@ -65,56 +65,74 @@ public class VoskManager {
         return "";
     }
     
+    private static final Object RECOGNIZER_LOCK = new Object();
+    
     public static void startListening(Consumer<String> partial, Consumer<String> sentence) {
-        if (isListening) return; // Don't start twice!
+        if (isListening) return;
         isListening = true;
         logger.info("Vosk is now listening...");
         
-        // 1. Define the audio format
         AudioFormat format = new AudioFormat(16000, 16, 1, true, false);
         DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
         
-        try {
-            TargetDataLine line = (TargetDataLine) AudioSystem.getLine(info);
-            line.open(format);
-            line.start();
-            
-            // 2. Run the capture in a background thread so the game doesn't hang
-            CompletableFuture.runAsync(() -> {
-                byte[] buffer = new byte[4096];
-                int nbytes;
+        CompletableFuture.runAsync(() -> {
+            try (TargetDataLine line = (TargetDataLine) AudioSystem.getLine(info)) {
+                line.open(format);
+                line.start();
                 
+                byte[] buffer = new byte[4096];
                 while (isListening) {
-                    nbytes = line.read(buffer, 0, buffer.length);
+                    int nbytes = line.read(buffer, 0, buffer.length);
+                    if (nbytes <= 0) continue;
                     
-                    double sum = 0;
-                    for (int i = 0; i < nbytes; i++) {
-                        sum += Math.abs(buffer[i]);
-                    }
-                    double averageVolume = sum / nbytes;
-                    if (averageVolume < 0.1) {
-                        logger.warn("Vosk is receiving SILENCE. Check OS mic settings.");
-                    }
-                    // ----------------------------
-                    
-                    if (recognizer.acceptWaveForm(buffer, nbytes)) {
-                        String result = getTextFromJson(recognizer.getResult(), "text");
-                        if (!result.isEmpty()) {
-                            Minecraft.getInstance().execute(() -> sentence.accept(result));
-                        }
-                    } else {
-                        String partialText = getTextFromJson(recognizer.getPartialResult(), "partial");
-                        if (!partialText.isEmpty()) {
-                            Minecraft.getInstance().execute(() -> partial.accept(partialText));
+                    // LOCK: Ensure the recognizer isn't swapped during this call
+                    synchronized (RECOGNIZER_LOCK) {
+                        if (recognizer == null) continue;
+                        
+                        if (recognizer.acceptWaveForm(buffer, nbytes)) {
+                            String result = getTextFromJson(recognizer.getResult(), "text");
+                            if (!result.isEmpty()) {
+                                Minecraft.getInstance().execute(() -> sentence.accept(result));
+                            }
+                        } else {
+                            String partialText = getTextFromJson(recognizer.getPartialResult(), "partial");
+                            if (!partialText.isEmpty()) {
+                                Minecraft.getInstance().execute(() -> partial.accept(partialText));
+                            }
                         }
                     }
                 }
                 line.stop();
-                line.close();
-            });
+            } catch (LineUnavailableException e) {
+                logger.error("Microphone unavailable: ", e);
+            } finally {
+                isListening = false;
+            }
+        });
+    }
+    
+    public static void createRecognition(String[] grammar) {
+        synchronized (RECOGNIZER_LOCK) {
+            // 1. Clean up old native resources!
+            if (recognizer != null) {
+                recognizer.close();
+            }
             
-        } catch (LineUnavailableException e) {
-            e.printStackTrace();
+            // 2. Build the grammar
+            JsonArray array = new JsonArray();
+            for (String s : grammar) {
+                if (s != null && !s.trim().isEmpty()) {
+                    array.add(s.trim().toLowerCase());
+                }
+            }
+            
+            if (!array.contains(new JsonPrimitive("[unk]"))) {
+                array.add("[unk]");
+            }
+            
+            // 3. Assign the new recognizer
+            recognizer = new Recognizer(getModel(), 16000f, array.toString());
+            logger.info("Vosk grammar updated successfully.");
         }
     }
     
@@ -124,17 +142,6 @@ public class VoskManager {
     
     public static void stopListening() {
         isListening = false;
-    }
-    
-    public static void createRecognition(String[] grammar) {
-        JsonArray array = new JsonArray();
-        for (String s : grammar) array.add(s);
-        
-        if (!array.contains(new JsonPrimitive("[unk]"))) {
-            array.add("[unk]");
-        }
-        
-        recognizer = new Recognizer(getModel(), 16000f, array.toString());
     }
     
     public static void createRecognition() {
