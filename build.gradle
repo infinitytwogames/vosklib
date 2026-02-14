@@ -168,7 +168,6 @@ shadowJar {
     }
 
     // Safety check: Remove any module-info files that might cause
-    // the "ResolutionException" you saw earlier
     exclude 'module-info.class'
     exclude 'META-INF/versions/*/module-info.class'
 

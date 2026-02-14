@@ -13,6 +13,7 @@ import org.infinitytwogames.vosklib.data.FileDownloader;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class ConfigScreen extends Screen {
     private final Screen lastScreen;
@@ -73,7 +74,7 @@ public class ConfigScreen extends Screen {
     
     private void refreshList() {
         this.modelList.clear();
-        ModelEntry toSelect = null;
+        AtomicReference<ModelEntry> toSelect = new AtomicReference<>();
         String currentlySelected = DataLoader.getSelected();
         
         onlineModels.stream()
@@ -91,22 +92,20 @@ public class ConfigScreen extends Screen {
                     
                     return m1.langText().compareToIgnoreCase(m2.langText());
                 })
-                .forEach(model -> this.modelList.add(new ModelEntry(model, DataLoader.isModelDownloaded(model.name()))));
+                .forEach(model -> {
+                    this.modelList.add(new ModelEntry(model, DataLoader.isModelDownloaded(model.name())));
+                    boolean isDownloaded = DataLoader.isModelDownloaded(model.name());
+                    ModelEntry entry = new ModelEntry(model, isDownloaded);
+                    
+                    this.modelList.add(entry);
+                    
+                    if (model.name().equalsIgnoreCase(currentlySelected)) {
+                        toSelect.set(entry);
+                    }
+                });
         
-        // 2. Add to the UI list
-        for (DataLoader.VoskModel model : onlineModels) {
-            boolean isDownloaded = DataLoader.isModelDownloaded(model.name());
-            ModelEntry entry = new ModelEntry(model, isDownloaded);
-            
-            this.modelList.add(entry);
-            
-            if (model.name().equalsIgnoreCase(currentlySelected)) {
-                toSelect = entry;
-            }
-        }
-        
-        if (toSelect != null) {
-            this.modelList.setSelected(toSelect);
+        if (toSelect.get() != null) {
+            this.modelList.setSelected(toSelect.get());
         }
     }
     
