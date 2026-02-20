@@ -8,24 +8,27 @@ import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import org.infinitytwogames.vosklib.VoskManager;
+import org.infinitytwogames.vosklib.Vosklib;
+import org.infinitytwogames.vosklib.data.Config;
 import org.infinitytwogames.vosklib.data.DataLoader;
 import org.infinitytwogames.vosklib.data.FileDownloader;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class ConfigScreen extends Screen {
     private final Screen lastScreen;
     private ModelList modelList;
-    private static String selectedDownload = "";
     private Button downloadButton;
     private ProgressBar progressBar;
-    private List<DataLoader.VoskModel> onlineModels = new ArrayList<>();
+    private List<DataLoader.VoskModel> onlineModels = Collections.synchronizedList(new ArrayList<>());
     private boolean isLoading = true;
     private DataLoader.VoskModel toDownload;
     private EditBox searchBox;
     private String lastSearch = "";
+    private boolean modelSelectedChanged;
     
     public ConfigScreen(Screen lastScreen) {
         super(Component.literal("VOSK Model Manager"));
@@ -57,17 +60,37 @@ public class ConfigScreen extends Screen {
                 this.isLoading = false;
                 this.refreshList(); // Method to populate the ModelList
             });
-        });
+        },
+            error -> Minecraft.getInstance().execute(() -> {
+                this.isLoading = false;
+                // Show the error to the user via a Toast or a red label in the UI
+                Vosklib.showToast("Network Error", "Could not reach Vosk servers.");
+            })
+        );
+        
+        this.addRenderableWidget(Button.builder(
+                        Component.literal("Transcript: " + (Config.SHOW_TRANSCRIPT.get() ? "ON" : "OFF")),
+                        b -> {
+                            // Toggle the value
+                            boolean newValue = !Config.SHOW_TRANSCRIPT.get();
+                            Config.SHOW_TRANSCRIPT.set(newValue);
+                            DataLoader.save(); // Ensure it writes to the .toml file
+                            
+                            // Update the button text immediately
+                            b.setMessage(Component.literal("Transcript: " + (newValue ? "ON" : "OFF")));
+                        })
+                .bounds(16, this.height - 25, 100, 20)
+                .build());
         
         // Action Buttons
         this.downloadButton = addRenderableWidget(Button.builder(Component.literal("Download"), b -> startDownload())
-                .bounds(this.width / 2 - 105, this.height - 25, 100, 20).build());
+                .bounds(this.width - 232, this.height - 25, 100, 20).build());
         this.downloadButton.active = false;
         
         addRenderableWidget(Button.builder(Component.literal("Save & Exit"), b -> {
-            VoskManager.init();
+            if (modelSelectedChanged) VoskManager.init();
             this.minecraft.setScreen(lastScreen);
-        }).bounds(this.width / 2 + 5, this.height - 25, 100, 20).build());
+        }).bounds(this.width - 116, this.height - 25, 100, 20).build());
         
         this.progressBar = new ProgressBar(16, height - 55, width - 36, 10);
     }
@@ -93,7 +116,6 @@ public class ConfigScreen extends Screen {
                     return m1.langText().compareToIgnoreCase(m2.langText());
                 })
                 .forEach(model -> {
-                    this.modelList.add(new ModelEntry(model, DataLoader.isModelDownloaded(model.name())));
                     boolean isDownloaded = DataLoader.isModelDownloaded(model.name());
                     ModelEntry entry = new ModelEntry(model, isDownloaded);
                     
@@ -128,7 +150,7 @@ public class ConfigScreen extends Screen {
         guiGraphics.drawCenteredString(font, this.title, this.width / 2, 10, 0xFFFFFF);
         if (isLoading) {
             String text = "Loading...";
-            guiGraphics.drawCenteredString(font, text, this.width / 2, font.lineHeight + 10 + 2, 0xa3a3a3);
+            guiGraphics.drawCenteredString(font, text, this.width / 2, font.lineHeight + 12 + 2, 0xa3a3a3);
         }
         
         if (DataLoader.totalSize.get() > 0) {
@@ -141,7 +163,13 @@ public class ConfigScreen extends Screen {
     
     private void startDownload() {
         if (FileDownloader.getSpeedTimer().isActive()) return;
-        DataLoader.startDownload(toDownload.name(), toDownload.url());
+        DataLoader.startDownload(
+                toDownload.name(),
+                toDownload.url(),
+                () -> Minecraft.getInstance().execute(this::refreshList),
+                () -> Minecraft.getInstance().execute(() -> Vosklib.showToast("Download Failure", "Could not download the selected model."))
+        );
+        downloadButton.active = false;
     }
     
     // --- INNER CLASSES FOR SCROLLING ---
@@ -199,8 +227,12 @@ public class ConfigScreen extends Screen {
         
         @Override
         public boolean mouseClicked(double mouseX, double mouseY, int button) {
-            selectedDownload = model.name();
+            if (FileDownloader.getSpeedTimer().isActive()) {
+                downloadButton.active = false;
+                return true;
+            }
             if (isDownloaded) {
+                modelSelectedChanged = true;
                 DataLoader.select(model.name().toLowerCase());
                 DataLoader.save();
                 downloadButton.active = false;

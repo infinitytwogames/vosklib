@@ -8,6 +8,7 @@ import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
 import java.io.*;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -16,6 +17,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -23,7 +25,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 public class DataLoader {
-    private static final Map<String, Path> models = Collections.synchronizedMap(new HashMap<>());
+    private static final Map<String, Path> models = new ConcurrentHashMap<>();
     private static final Path config = FMLPaths.CONFIGDIR.get().resolve("vosk");
     private static final Logger logger = LogUtils.getLogger();
     
@@ -72,7 +74,7 @@ public class DataLoader {
         models.put(version, model);
     }
     
-    public static void startDownload(String modelType, String url) {
+    public static void startDownload(String modelType, String url, Runnable onComplete, Runnable onFailure) {
         new Thread(() -> {
             try {
                 // 1. Setup paths
@@ -94,10 +96,12 @@ public class DataLoader {
                 // 5. Cleanup and save config
                 save();
                 FileDownloader.stopTracking();
+                onComplete.run();
                 
                 System.out.println("Download complete: " + modelType);
             } catch (Exception e) {
-                e.printStackTrace();
+                logger.error("Failed to download file \"{}\"", url, e);
+                onFailure.run();
             }
         }).start();
     }
@@ -186,21 +190,31 @@ public class DataLoader {
         selected = model;
     }
     
-    public static void fetchOnlineModels(Consumer<List<VoskModel>> callback) {
+    public static void fetchOnlineModels(Consumer<List<VoskModel>> callback, Consumer<Throwable> onFailure) {
         CompletableFuture.runAsync(() -> {
             try {
                 URL url = new URL("https://alphacephei.com/vosk/models/model-list.json");
-                try (InputStreamReader reader = new InputStreamReader(url.openStream())) {
-                    JsonArray array = JsonParser.parseReader(reader).getAsJsonArray();
-                    List<VoskModel> models = getVoskModels(array);
-                    
-                    // Sort by language, then by type (small vs big)
-                    models.sort(Comparator.comparing(VoskModel::langText).thenComparing(VoskModel::type));
-                    
-                    callback.accept(models);
+                
+                String jsonContent;
+                try (Scanner scanner = new Scanner(url.openStream(), StandardCharsets.UTF_8)) {
+                    jsonContent = scanner.useDelimiter("\\A").next();
                 }
+                
+                // 2. Save to manifest file
+                Path file = config.resolve("manifest.json");
+                Files.writeString(file, jsonContent);
+                
+                // 3. Parse the JSON from the String we already have
+                JsonArray array = JsonParser.parseString(jsonContent).getAsJsonArray();
+                List<VoskModel> models = getVoskModels(array);
+                
+                // Sort by language, then by type (small vs big)
+                models.sort(Comparator.comparing(VoskModel::langText).thenComparing(VoskModel::type));
+                
+                callback.accept(models);
+                
             } catch (Exception e) {
-                e.printStackTrace();
+                onFailure.accept(e);
             }
         });
     }
@@ -230,7 +244,7 @@ public class DataLoader {
         return models.get(name) != null;
     }
     
-    public static void getOnlineModels(Consumer<List<VoskModel>> callback) {
+    public static void getOnlineModels(Consumer<List<VoskModel>> callback, Consumer<Throwable> onFailure) {
         Path file = config.resolve("manifest.json");
         
         if (Files.exists(file)) {
@@ -263,7 +277,7 @@ public class DataLoader {
             }
         }
         
-        fetchOnlineModels(callback);
+        fetchOnlineModels(callback, onFailure);
     }
     
     public record VoskModel(

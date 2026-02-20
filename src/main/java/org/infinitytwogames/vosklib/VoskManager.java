@@ -6,7 +6,9 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
+import net.minecraftforge.common.MinecraftForge;
 import org.infinitytwogames.vosklib.data.DataLoader;
+import org.infinitytwogames.vosklib.events.VoskVoiceEvent;
 import org.slf4j.Logger;
 import org.vosk.Model;
 import org.vosk.Recognizer;
@@ -28,23 +30,40 @@ public class VoskManager {
         Path path = DataLoader.getSelectedPath();
         
         if (path == null || !path.toFile().exists()) {
-            System.err.println("VoskLib: Cannot initialize! No model selected or folder missing.");
+            logger.warn("VoskLib: Cannot initialize! No model selected or folder missing.");
             return;
         }
         
         try {
-            // Vosk loads its own natives if they are on the system library path.
-            // In Forge, you might need to load them manually or ensure they're in the 'natives' folder.
-            
-            System.out.println("VoskLib: Loading model from " + path.toAbsolutePath());
+            logger.info("VoskLib: Loading model from {}", path.toAbsolutePath());
             vModel = new Model(path.toAbsolutePath().toString());
-            System.out.println("VoskLib: Vosk initialized successfully! Creating the Recognizer");
-            
-            
+            logger.info("VoskLib: Vosk initialized successfully!");
             
         } catch (Exception e) {
-            System.err.println("VoskLib: Failed to initialize Vosk!");
+            logger.error("VoskLib: Failed to initialize Vosk!");
+            Vosklib.showToast("VOSK", "Failed to initialize VOSK.");
             e.printStackTrace();
+        }
+    }
+    
+    public static void terminate() {
+        synchronized (RECOGNIZER_LOCK) {
+            isListening = false;
+            if (recognizer != null) {
+                recognizer.close();
+                recognizer = null;
+            }
+            if (vModel != null) {
+                vModel.close(); // Crucial for native memory!
+                vModel = null;
+            }
+        }
+    }
+    
+    private static void safeCloseRecognizer() {
+        if (recognizer != null) {
+            recognizer.close(); // Free native memory before creating a new one
+            recognizer = null;
         }
     }
     
@@ -67,10 +86,23 @@ public class VoskManager {
     
     private static final Object RECOGNIZER_LOCK = new Object();
     
-    public static void startListening(Consumer<String> partial, Consumer<String> sentence) {
+    public static void startListening() {
+        startListening(s -> MinecraftForge.EVENT_BUS.post(new VoskVoiceEvent.Partial(s)), s -> MinecraftForge.EVENT_BUS.post(new VoskVoiceEvent.Result(s)));
+    }
+    
+    private static void startListening(Consumer<String> partial, Consumer<String> sentence) {
         if (isListening) return;
+        if (vModel == null) {
+            Vosklib.showToast("VoskLib", "The model is not selected. Please open VoskLib configuration screen.");
+            return;
+        }
+        if (recognizer == null) {
+            if (!createRecognition()) return;
+        }
+        
         isListening = true;
         logger.info("Vosk is now listening...");
+        Vosklib.showToast("VoskLib", "VoskLib is now listening...");
         
         AudioFormat format = new AudioFormat(16000, 16, 1, true, false);
         DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
@@ -83,7 +115,7 @@ public class VoskManager {
                 byte[] buffer = new byte[4096];
                 while (isListening) {
                     int nbytes = line.read(buffer, 0, buffer.length);
-                    if (nbytes <= 0) continue;
+                    if (!isListening || nbytes <= 0) continue;
                     
                     // LOCK: Ensure the recognizer isn't swapped during this call
                     synchronized (RECOGNIZER_LOCK) {
@@ -104,6 +136,7 @@ public class VoskManager {
                 }
                 line.stop();
             } catch (LineUnavailableException e) {
+                Vosklib.showToast("VoskLib", "Microphone unavailable! Check your privacy settings.");
                 logger.error("Microphone unavailable: ", e);
             } finally {
                 isListening = false;
@@ -111,11 +144,19 @@ public class VoskManager {
         });
     }
     
-    public static void createRecognition(String[] grammar) {
+    public static boolean createRecognition(String[] grammar) {
         synchronized (RECOGNIZER_LOCK) {
+            if (vModel == null) {
+                logger.error("Cannot create grammar recognizer because model is not selected or deleted from memory");
+                Vosklib.showToast("VoskLib", "The model is not selected.");
+                return false;
+            }
+            
             // 1. Clean up old native resources!
-            if (recognizer != null) {
-                recognizer.close();
+            safeCloseRecognizer();
+            
+            if (grammar == null || grammar.length == 0) {
+                return createRecognition();
             }
             
             // 2. Build the grammar
@@ -133,6 +174,7 @@ public class VoskManager {
             // 3. Assign the new recognizer
             recognizer = new Recognizer(getModel(), 16000f, array.toString());
             logger.info("Vosk grammar updated successfully.");
+            return true;
         }
     }
     
@@ -142,14 +184,26 @@ public class VoskManager {
     
     public static void stopListening() {
         isListening = false;
+        Vosklib.showToast("VoskLib", "VoskLib has stopped listening.");
     }
     
-    public static void createRecognition() {
-        try {
-            recognizer = new Recognizer(getModel(), 16000f);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+    public static boolean createRecognition() {
+        synchronized (RECOGNIZER_LOCK) {
+            try {
+                if (vModel == null) {
+                    logger.error("Cannot create recognizer because model is not selected or deleted from memory");
+                    Vosklib.showToast("VoskLib", "The model is not selected.");
+                    return false;
+                }
+                
+                safeCloseRecognizer();
+                recognizer = new Recognizer(getModel(), 16000f);
+                
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
+        return true;
     }
     
     public static void feedAudio(byte[] audioData) {

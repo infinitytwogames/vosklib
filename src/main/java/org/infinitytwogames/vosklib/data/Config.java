@@ -1,6 +1,7 @@
 package org.infinitytwogames.vosklib.data;
 
 import net.minecraftforge.common.ForgeConfigSpec;
+import oshi.hardware.platform.unix.solaris.SolarisHWDiskStore;
 
 import java.util.List;
 
@@ -10,25 +11,16 @@ public class Config {
     
     // These will hold our actual values
     public static final ForgeConfigSpec.ConfigValue<String> SELECTED_MODEL;
-    public static final ForgeConfigSpec.DoubleValue SENSITIVITY;
-    public static final ForgeConfigSpec.BooleanValue AUTO_DOWNLOAD;
     public static final ForgeConfigSpec.IntValue REFRESH_TIME;
     public static final ForgeConfigSpec.ConfigValue<List<? extends String>> DOWNLOADED_MODELS;
+    public static ForgeConfigSpec.BooleanValue SHOW_TRANSCRIPT;
     
     static {
-        BUILDER.push("VOSK Settings");
+        BUILDER.push("VOSK Model Settings");
         
         SELECTED_MODEL = BUILDER
-                .comment("The model currently selected for voice recognition (Small, Medium, Large)")
-                .define("selectedModel", "Small");
-        
-        SENSITIVITY = BUILDER
-                .comment("Microphone sensitivity (0.0 to 1.0)")
-                .defineInRange("sensitivity", 0.5, 0.0, 1.0);
-        
-        AUTO_DOWNLOAD = BUILDER
-                .comment("Should the mod automatically download missing models?")
-                .define("autoDownload", true);
+                .comment("The model currently selected for voice recognition.")
+                .define("selectedModel", "none");
         
         DOWNLOADED_MODELS = BUILDER
                 .comment("List of models currently downloaded and unzipped in the config folder.")
@@ -40,6 +32,13 @@ public class Config {
                 .comment("Time for the manifest to be redownloaded.")
                 .defineInRange("days", 36, 0, 356)
         ;
+        
+        BUILDER.pop();
+        BUILDER.push("VoskLib Settings");
+        
+        SHOW_TRANSCRIPT = BUILDER
+                .comment("Should the transcribed voice text be displayed?")
+                .define("show_transcript", true);
         
         BUILDER.pop();
         SPEC = BUILDER.build();

@@ -1,10 +1,12 @@
 package org.infinitytwogames.vosklib;
 
 import com.mojang.logging.LogUtils;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.components.toasts.SystemToast;
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.client.ConfigScreenHandler;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.GameShuttingDownEvent;
-import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoader;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -26,7 +28,7 @@ public class Vosklib {
     private static final Logger LOGGER = LogUtils.getLogger();
     
     public Vosklib() {
-        ModLoadingContext.get().registerConfig(net.minecraftforge.fml.config.ModConfig.Type.COMMON, Config.SPEC, "vosklib-common.toml");
+        ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, Config.SPEC, "vosklib-client.toml");
         
         ModLoadingContext.get().registerExtensionPoint(
                 ConfigScreenHandler.ConfigScreenFactory.class,
@@ -57,11 +59,19 @@ public class Vosklib {
         }
     }
     
+    public static void showToast(String title, String message) {
+        Minecraft.getInstance().getToasts().addToast(new SystemToast(
+                SystemToast.SystemToastIds.PERIODIC_NOTIFICATION,
+                Component.literal(title),
+                Component.literal(message)
+        ));
+    }
+    
     private void setup(FMLCommonSetupEvent event) {
         event.enqueueWork(DataLoader::loadFromConfig);
     }
     
     private void onShutDown(GameShuttingDownEvent event) {
-    
+        VoskManager.terminate();
     }
 }
